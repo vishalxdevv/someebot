@@ -1,0 +1,89 @@
+name: "MC Identity Forge"
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  update-username:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name:  Checkout repo
+        uses: actions/checkout@v4
+
+      - name:  Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name:  Generate Ultra-Unique Username
+        id: gen
+        run: |
+          adjectives=("Void" "Quantum" "Neon" "Crimson" "Silent" "Phantom" "Iron" "Nova" "Obsidian" "Savage" "Lucid" "Atomic")
+          nouns=("Drift" "Pulse" "Forge" "Vertex" "Cipher" "Flux" "Rift" "Echo" "Shard" "Matrix" "Vortex" "Horizon")
+          tech=("X" "Z" "XR" "Prime" "Zero" "One" "NX" "Core" "Edge" "OS")
+
+          # Pick random pattern
+          pattern=$((RANDOM % 4))
+
+          a=${adjectives[$RANDOM % ${#adjectives[@]}]}
+          n=${nouns[$RANDOM % ${#nouns[@]}]}
+          t=${tech[$RANDOM % ${#tech[@]}]}
+
+          # Add time entropy (last 3 digits of epoch)
+          stamp=$(date +%s | tail -c 4)
+
+          if [ "$pattern" -eq 0 ]; then
+            full_name="${a}${n}"
+          elif [ "$pattern" -eq 1 ]; then
+            full_name="${a}${n}${t}"
+          elif [ "$pattern" -eq 2 ]; then
+            full_name="${n}${a}${stamp}"
+          else
+            full_name="${a}${stamp}${t}"
+          fi
+
+          # Limit to 16 characters (Minecraft limit)
+          final_name=$(echo "$full_name" | cut -c1-16)
+
+          # Read previous username (if exists)
+          if [ -f settings.json ]; then
+            previous=$(jq -r '.["bot-account"].username' settings.json)
+          else
+            previous=""
+          fi
+
+          # If same as previous, force regenerate with nano timestamp
+          if [ "$final_name" = "$previous" ]; then
+            nano=$(date +%N | cut -c1-3)
+            final_name=$(echo "${a}${n}${nano}" | cut -c1-16)
+          fi
+
+          echo "USERNAME=$final_name" >> $GITHUB_ENV
+          echo "::notice::New Identity Generated: $final_name"
+
+      - name:  Update settings.json
+        run: |
+          if [ ! -f settings.json ]; then
+            echo '{"bot-account": {"username": "default"}}' > settings.json
+          fi
+
+          jq --arg name "$USERNAME" '.["bot-account"].username = $name' settings.json > temp.json
+          mv temp.json settings.json
+
+      - name:  Sync to Repository
+        run: |
+          git config user.name "vishalxdevv"
+          git config user.email "04vishal.com@gmail.com"
+          
+          git add settings.json
+          
+          if git diff --staged --quiet; then
+            echo "No change in username this round."
+          else
+            git commit -m "Identity Mutation: $USERNAME"
+            git push
+          fi
